@@ -93,7 +93,21 @@ app_ui = ui.page_fluid(
 
 
 def server(input, output, session):
-    pass
+    import numpy as np
+    
+    @reactive.effect
+    def update_councils():
+        selected_regions = input.regions()
+
+        if not selected_regions:
+            ui.update_selectize("councils", choices=[], selected=[])
+            return
+
+        filtered_councils = df[df["region"].isin(selected_regions)]["council"].unique()
+        filtered_councils = sorted(np.unique(filtered_councils))
+
+        ui.update_selectize("councils", choices=filtered_councils, selected=[])
+
 
 
 app = App(app_ui, server)
