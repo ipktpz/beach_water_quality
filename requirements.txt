@@ -11,6 +11,6 @@ python-dotenv
 chatlas
 sqlalchemy
 duckdb
--e querychat
+
 
 
