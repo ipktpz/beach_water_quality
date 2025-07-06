@@ -9,6 +9,7 @@ faicons
 leafmap
 python-dotenv
 chatlas
+querychat
 sqlalchemy
 duckdb
 
