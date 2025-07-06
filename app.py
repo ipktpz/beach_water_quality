@@ -1,9 +1,10 @@
 import plotly.express as px
 from shiny import App, render, ui, reactive
-from shinywidgets import output_widget, render_plotly
+from shinywidgets import output_widget, render_plotly, render_widget
 import pandas as pd
 import faicons as fa
 import leafmap
+from ipyleaflet import Map, CircleMarker, LayerGroup
 import ipywidgets as widgets
 from ipywidgets import HTML  
 from ipyleaflet import AwesomeIcon
@@ -13,9 +14,6 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), "querychat", "pkg-py"))
 from dotenv import load_dotenv
 import querychat as qc
-
-
-
 
 # ------------------- Load the data ---------------------------------------------------------------------------------------------------------
 
@@ -76,7 +74,7 @@ app_ui = ui.page_fluid(
             ui.layout_sidebar(
                 ui.sidebar(
                             ui.div( ui.h3("Filters"),
-                                    ui.input_date_range("daterange", "Select Date range", start=min_date, end=max_date, format="yyyy-mm-dd", width= "100%"),
+                                    ui.input_date_range("daterange", "Select Date range", start="2020-04-28", end=max_date, format="yyyy-mm-dd", width= "100%"),
                                     ui.br(),
                                     ui.input_checkbox_group(  
                                         "regions",  
@@ -124,10 +122,11 @@ app_ui = ui.page_fluid(
                                             ui.card_header('Water quality over the years'),
                                             output_widget("water_quality_over_years_chart")
                                         ),
-                                        # ui.card(
-                                        #     ui.card_header('High Risk Areas'),
-                                        #     ui.output_ui("high_risk_map")
-                                        # )
+                                        ui.card(
+                                            ui.card_header("Map of Beaches Colored by Enterococci Levels"),
+                                            output_widget("beach_map", height="500px")
+                                        ),
+
 
             )),
         ui.nav_panel(
@@ -430,51 +429,55 @@ def server(input, output, session):
         return fig
 
 # # -------------------- add a map woth high risk areas ------------------------------------------------
+    @render_widget
+    def beach_map():
+        df_filtered = filtered_df()
 
-#     @reactive.calc
-#     def high_risk_map_html():
-#         df_filtered = filtered_df()
-#         if df_filtered.empty:
-#             return "<p>No data available.</p>"
-#         df_copy = df_filtered.copy()
-#         # Filter for high-risk swim sites (enterococci > 130)
-#         high_risk = df_copy[df_copy["enterococci"] > 130]
+        # df_filtered["latitude"] = pd.to_numeric(df_filtered["latitude"], errors="coerce")
+        # df_filtered["longitude"] = pd.to_numeric(df_filtered["longitude"], errors="coerce")
 
-#         if high_risk.empty:
-#             return "<p>No high-risk swim sites found.</p>"
+        # df_filtered = df_filtered.dropna(subset=["latitude", "longitude"])
 
-#         # Ensure lat/lon exist
-#         if not {'latitude', 'longitude'}.issubset(high_risk.columns):
-#             return "<p>Latitude and longitude columns are required to map locations.</p>"
+        m = Map(center=[-33.86, 151.20], zoom=10)
 
-#         m = leafmap.Map(center=[-33.86, 151.20], zoom=10)  # Center on Sydney (adjust if needed)
+        if df_filtered.empty or not {'latitude', 'longitude', 'enterococci', 'beach'}.issubset(df_filtered.columns):
+            return m
 
-#         # Add high-risk sites to map
-#         markers = []
-#         for _, row in high_risk.iterrows():
-#             lat = row.get("latitude")
-#             lon = row.get("longitude")
-#             beach = row.get("beach", "Unknown")
-#             ecoli = row.get("enterococci", "N/A")
+        def get_color(level):
+            if level <= 40:
+                return "#287C8EFF"
+            elif level <= 130:
+                return "#440154FF"
+            else:
+                return "#FDE725FF"
+          # Aggregate per beach: average enterococci, and take first lat/lon
+        df_grouped = (
+            df_filtered
+            .dropna(subset=["latitude", "longitude"])
+            .groupby("beach")
+            .agg({
+                "enterococci": "mean",
+                "latitude": "first",
+                "longitude": "first"
+            })
+            .reset_index()
+        )
+        def make_marker(row):
+                return CircleMarker(
+                    location=(row["latitude"], row["longitude"]),
+                    radius=5,
+                    color=get_color(row["enterococci"]),
+                    fill_color=get_color(row["enterococci"]),
+                    fill_opacity=0.6,
+                    popup=HTML(f"<b>{row['beach']}</b><br>Avg Enterococci: {row['enterococci']:.1f}")
+                )
+        
+        markers = df_grouped.apply(make_marker, axis=1).tolist()
+        group = LayerGroup(layers=markers)
+        m.add_layer(group)
 
-#             if pd.notnull(lat) and pd.notnull(lon):
-#                 popup_html = HTML(value=f"<strong>{beach}</strong><br>Enterococci: {ecoli}")
-#                 icon = AwesomeIcon(name='exclamation-triangle', marker_color='red', icon_color='white')
-#                 markers.append((lat, lon, popup_html, icon))
+        return m
 
-#         for lat, lon, popup, icon in markers:
-#             m.add_marker(location=(lat, lon), popup=popup, icon=icon)
-
-#         # Export to HTML
-#         html_file = "map_high_risk.html"
-#         m.to_html(html_file)
-#         with open(html_file, "r", encoding="utf-8") as f:
-#             return f.read()
-
-# # -------------------- render the map with high risk areas ------------------------------------------------
-#     @render.ui
-#     def high_risk_map():
-#         return ui.HTML(high_risk_map_html())
 
 # ----------- Server-side render logic for visual answers in FAQ ----------------------------------------------
 
