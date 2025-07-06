@@ -5,7 +5,15 @@ import pandas as pd
 import faicons as fa
 import leafmap
 import ipywidgets as widgets
+from ipywidgets import HTML  
 from ipyleaflet import AwesomeIcon
+import chatlas
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), "querychat", "pkg-py"))
+from dotenv import load_dotenv
+import querychat as qc
+
 
 
 
@@ -17,25 +25,58 @@ df["date"] = pd.to_datetime(df["date"])
 min_date = df["date"].min()
 max_date = df["date"].max()
 
+# ----------------------default values to reset filters -----------------------------------------------------------------------------------------
+
+DEFAULT_DATE_RANGE = (min_date, max_date)
+DEFAULT_REGIONS = []        
+DEFAULT_COUNCILS = []
+
+
 regions = df["region"].unique().tolist()
 councils = df["council"].unique().tolist()
-
 
 ICONS = {
     "site": fa.icon_svg("person-swimming", "solid"),
     "virus": fa.icon_svg("disease"),
     "check": fa.icon_svg("circle-check"),
 }
+# ----------------------------  define the LLM model ---------------------------------------------------------------------------------
+
+def use_anthropic_models(system_prompt: str) -> chatlas.Chat:
+
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY is not set in the environment.")
+
+    return chatlas.ChatAnthropic(
+        model="claude-3-7-sonnet-latest",
+        system_prompt=system_prompt,
+        api_key=api_key 
+    )
+
+
+
+chat_config = qc.init(df, "df", create_chat_callback=use_anthropic_models)
 
 # ------------------- Create the UI ----------------------------------------------------------------------------------------------------------
 
 app_ui = ui.page_fluid(
-    ui.navset_tab( 
+
+    ui.tags.style("""
+                    /* Make sidebar toggle arrow thicker and white */
+                    .shiny-sidebar-toggle {
+                        color: white !important;
+                        font-weight: bold;
+                        font-size: 20px;
+                        border: 2px solid white !important;
+                    }
+                    """),
+    ui.navset_tab (
         ui.nav_panel("Sydney Beach Water Quality Dashboard",  
             ui.layout_sidebar(
                 ui.sidebar(
                             ui.div( ui.h3("Filters"),
-                                    ui.input_date_range("daterange", "Select Date range", start=min_date, end=max_date, format="yyyy-mm-dd"),
+                                    ui.input_date_range("daterange", "Select Date range", start=min_date, end=max_date, format="yyyy-mm-dd", width= "100%"),
                                     ui.br(),
                                     ui.input_checkbox_group(  
                                         "regions",  
@@ -52,13 +93,17 @@ app_ui = ui.page_fluid(
                                     multiple=True
                                                 ),
                                     ui.br(),
-                                    ui.download_button("download_data", "Download Data", class_="btn-primary", style="width: 100%;")
-                            ), bg ="#035f86"),
-                                ui.layout_column_wrap(
-                                        ui.output_ui("total_beaches_box"),
-                                        ui.output_ui("most_polluted_beach_box"),
+                                    ui.download_button("download_data", "Download Data", class_="btn-primary", style="width: 100%; margin-bottom: 10px;"),
+                                    ui.br(),
+                                    ui.br(),
+                                    ui.input_action_button("reset", "Reset filter", class_="btn-primary", style="width: 100%;"),
+                                    open="desktop",
+                            ), bg ="#035f86", style="color: white;"),
+                                ui.row(
+                                        ui.column(4, ui.output_ui("total_beaches_box")),
+                                        ui.column(4, ui.output_ui("most_polluted_beach_box")),
                                         # ui.output_ui("most_frequently_polluted_beach_box"),
-                                        ui.output_ui("cleanest_beach_box"),
+                                        ui.column(4, ui.output_ui("cleanest_beach_box")),
                                     ),
                                     # Charts
                                 ui.div(
@@ -79,17 +124,58 @@ app_ui = ui.page_fluid(
                                             ui.card_header('Water quality over the years'),
                                             output_widget("water_quality_over_years_chart")
                                         ),
-                                        ui.card(
-                                            ui.card_header('High Risk Areas'),
-                                            ui.output_ui("high_risk_map")
-                                        )
+                                        # ui.card(
+                                        #     ui.card_header('High Risk Areas'),
+                                        #     ui.output_ui("high_risk_map")
+                                        # )
 
             )),
-        ui.nav_panel("Data", "Page B content"),  
-        ui.nav_panel("FAQ", "Page C content"),
+        ui.nav_panel(
+            "FAQ", 
+            ui.accordion(
+                    ui.accordion_panel(
+                        "Which beaches are most frequently polluted?",
+                        ui.p("This chart shows the beaches with the highest number of exceedances (Enterococci > 130 CFU/100mL)."),
+                        ui.layout_column_wrap(
+                        ui.card(output_widget("faq_high_risk_chart")),
+                        ui.card(ui.output_data_frame("faq_high_risk_df"))
+                    )),
+                    ui.accordion_panel(
+                        "How does water quality vary seasonally?",
+                        ui.p("Seasonal variations may influence pollution levels due to rainfall or water temperature."),
+                        ui.layout_column_wrap(
+                        ui.card(output_widget("faq_seasonal_variation_chart")),
+                        ui.card(ui.output_data_frame("faq_seasonal_variation_df"))
+                    )),
+                    ui.accordion_panel(
+                        "What data is used in this dashboard?",
+                        ui.p("This dashboard combines water quality measurements, weather conditions, and geographical data from public sources such as the NSW EPA.")
+                    ),
+                    ui.accordion_panel(
+                        "How are high-risk areas identified?",
+                        ui.p("High-risk beaches are those with repeated high Enterococci levels, based on thresholds from health guidelines."),
+                        ui.output_ui("faq_high_risk_map")
+                    ),
+                    open=False,
+                ),            
+            ),  
+        ui.nav_panel(
+            "Query Chat",
+                ui.layout_sidebar(
+                    ui.sidebar(
+                        qc.ui("chat"),
+                        width=350
+                    ),
+                    ui.layout_column_wrap(    
+                        ui.card(
+                            ui.card_header("Live Filtered Data"),
+                            ui.output_data_frame("chat_filtered_df")
+                        ),
+                        width=1)
+                )),
         id="page" 
        )
-    )
+)
 
 
 def server(input, output, session):
@@ -144,11 +230,19 @@ def server(input, output, session):
     @render.ui
     def total_beaches_box():
         total = total_beaches()
+        if total == 0:
+            return ui.value_box(
+            "Total Swim Sites Monitored",
+            "Please select",
+            showcase=ICONS["site"],
+            theme="bg-gradient-orange-red",
+        )
         return ui.value_box(
-            "Total Number of Swim Sites Monitored",
+            "Total Swim Sites Monitored",
             f"{total:,} Swim Sites",
             showcase=ICONS["site"],
             theme="bg-gradient-orange-red",
+            #style="min-height: 150px;"
         )
     
     # ------------------- reactive calculation for getting the most polluted beach (or most frequently polluted beach?)-------------------------------------------------------------------------------------------------
@@ -186,6 +280,7 @@ def server(input, output, session):
             showcase=ICONS["virus"],
             theme="bg-gradient-green-blue",
             #showcase_layout="top right",
+            #style="min-height: 150px;"
         )
     # ------------------- render the most frequently polluted beach as a value box ----------------------------------------------------------------------------------------
     # @render.ui
@@ -216,6 +311,7 @@ def server(input, output, session):
             cleanest_beach(),
             showcase=ICONS["check"],
             theme="text-purple",
+            #style="min-height: 150px;"
         )
 # -------------------- reactive calculation for determining which swim sites consistently have high enterococci levels ------------------------------------------------
 
@@ -333,44 +429,122 @@ def server(input, output, session):
         fig.update_layout(xaxis_title='Year', yaxis_title='Average Enterococci Level')
         return fig
 
-# -------------------- add a map woth high risk areas ------------------------------------------------
+# # -------------------- add a map woth high risk areas ------------------------------------------------
 
-    @reactive.calc
-    def high_risk_map_html():
-        df_filtered = filtered_df()
-        if df_filtered.empty:
-            return "<p>No data available.</p>"
-        df_copy = df_filtered.copy()
-        # Filter for high-risk swim sites (enterococci > 130)
-        high_risk = df_copy[df_copy["enterococci"] > 130]
+#     @reactive.calc
+#     def high_risk_map_html():
+#         df_filtered = filtered_df()
+#         if df_filtered.empty:
+#             return "<p>No data available.</p>"
+#         df_copy = df_filtered.copy()
+#         # Filter for high-risk swim sites (enterococci > 130)
+#         high_risk = df_copy[df_copy["enterococci"] > 130]
 
-        if high_risk.empty:
-            return "<p>No high-risk swim sites found.</p>"
+#         if high_risk.empty:
+#             return "<p>No high-risk swim sites found.</p>"
 
-        # Ensure lat/lon exist
-        if not {'latitude', 'longitude'}.issubset(high_risk.columns):
-            return "<p>Latitude and longitude columns are required to map locations.</p>"
+#         # Ensure lat/lon exist
+#         if not {'latitude', 'longitude'}.issubset(high_risk.columns):
+#             return "<p>Latitude and longitude columns are required to map locations.</p>"
 
-        m = leafmap.Map(center=[-33.86, 151.20], zoom=10)  # Center on Sydney (adjust if needed)
+#         m = leafmap.Map(center=[-33.86, 151.20], zoom=10)  # Center on Sydney (adjust if needed)
 
-        # Add high-risk sites to map
-        for _, row in high_risk.iterrows():
-            popup_html = widgets.HTML(value=f"{row['beach']}<br>Enterococci: {row['enterococci']}")
-            icon = AwesomeIcon(name='exclamation-triangle', marker_color='red', icon_color='white')
-            m.add_marker(
-                location=(row["latitude"], row["longitude"]),
-                popup=popup_html,
-                icon=icon            
-                )
+#         # Add high-risk sites to map
+#         markers = []
+#         for _, row in high_risk.iterrows():
+#             lat = row.get("latitude")
+#             lon = row.get("longitude")
+#             beach = row.get("beach", "Unknown")
+#             ecoli = row.get("enterococci", "N/A")
 
-        html_file = "map_high_risk.html"
-        m.to_html(html_file)
-        with open(html_file, "r", encoding="utf-8") as f:
-            return f.read()
+#             if pd.notnull(lat) and pd.notnull(lon):
+#                 popup_html = HTML(value=f"<strong>{beach}</strong><br>Enterococci: {ecoli}")
+#                 icon = AwesomeIcon(name='exclamation-triangle', marker_color='red', icon_color='white')
+#                 markers.append((lat, lon, popup_html, icon))
 
-# -------------------- render the map with high risk areas ------------------------------------------------
-    @render.ui
-    def high_risk_map():
-        return ui.HTML(high_risk_map_html())
+#         for lat, lon, popup, icon in markers:
+#             m.add_marker(location=(lat, lon), popup=popup, icon=icon)
 
+#         # Export to HTML
+#         html_file = "map_high_risk.html"
+#         m.to_html(html_file)
+#         with open(html_file, "r", encoding="utf-8") as f:
+#             return f.read()
+
+# # -------------------- render the map with high risk areas ------------------------------------------------
+#     @render.ui
+#     def high_risk_map():
+#         return ui.HTML(high_risk_map_html())
+
+# ----------- Server-side render logic for visual answers in FAQ ----------------------------------------------
+
+    @render_plotly
+    def faq_high_risk_chart():
+        df_high = high_enterococci_sites()
+        if df_high.empty:
+            return px.bar(title="No swim sites with high enterococci levels found.")
+
+        fig = px.bar(
+            df_high,
+            x='beach',
+            y='count',
+            title='Swim Sites with High Enterococci Levels',
+            labels={'beach': 'Swim Site', 'count': 'Number of High Enterococci Records'},
+            color='count',
+            color_continuous_scale=px.colors.sequential.Viridis
+        )
+        fig.update_layout(xaxis_title='Swim Site', yaxis_title='Number of High Enterococci Records')
+        return fig
+
+    @render.data_frame
+    def faq_high_risk_df():
+        return high_enterococci_sites().head(10)  # Display the top 10 swim sites with high enterococci levels
+
+
+    @render_plotly
+    def faq_seasonal_variation_chart():
+        df_season = water_quality_by_season()
+        if df_season.empty:
+            return px.bar(title="No data available for the selected filters.")
+
+        fig = px.bar(
+            df_season,
+            x='season',
+            y='enterococci',
+            title='Average Enterococci Levels by Season',
+            labels={'season': 'Season', 'enterococci': 'Average Enterococci Level'},
+            color='enterococci',
+            color_continuous_scale=px.colors.sequential.Viridis
+        )
+        fig.update_layout(xaxis_title='Season', yaxis_title='Average Enterococci Level')
+        return fig
+        
+    @render.data_frame
+    def faq_seasonal_variation_df():
+        return water_quality_by_season().head(10)  # Display the top 10 seasonal variations
+   
+   
+        
+      
+    chat = qc.server("chat", chat_config)
+
+    @render.data_frame
+    def chat_filtered_df():
+        return chat.df()
+# ------------------------ render the download button -------------------------------------------------------------
+
+    @render.download(filename="filtered_data.csv")
+    def download_data():
+        df_out = filtered_df()
+        return df_out.to_csv(index=False)
+
+#--------------------- reset the filters appliedd -----------------------------------------------------------------
+    @reactive.effect
+    @reactive.event(input.reset)
+    def _():
+        ui.update_date_range("daterange", start=DEFAULT_DATE_RANGE[0], end=DEFAULT_DATE_RANGE[1])
+        ui.update_checkbox_group("regions",  selected=DEFAULT_REGIONS)
+        ui.update_selectize("councils", selected=DEFAULT_COUNCILS)
+
+    
 app = App(app_ui, server)
