@@ -1,0 +1,15 @@
+shiny
+shinywidgets
+ipyleaflet
+ipywidgets
+plotly
+pandas
+numpy
+faicons
+leafmap
+python-dotenv
+chatlas
+sqlalchemy
+duckdb
+querychat
+
