@@ -62,11 +62,33 @@ app_ui = ui.page_fluid(
 
     ui.tags.style("""
                     /* Make sidebar toggle arrow thicker and white */
-                    .shiny-sidebar-toggle {
+                    .sidebar-toggle {
                         color: white !important;
                         font-weight: bold;
                         font-size: 20px;
                         border: 2px solid white !important;
+                    }
+                    .value-box {
+                        min-height: 140px;
+                        display: flex;
+                        flex-direction: column;
+                        justify-content: center;
+                        text-align: center;
+                    }
+
+                    .value-box-showcase {
+                        font-size: 1em;
+                    }
+
+                    .value-box-value {
+                        font-size: 0.5em;
+                        white-space: nowrap;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                    }
+
+                    .value-box-title {
+                        font-size: 1.5em;
                     }
                     """),
     ui.navset_tab (
