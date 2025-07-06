@@ -6,7 +6,6 @@ plotly
 pandas
 numpy
 faicons
-leafmap
 python-dotenv
 chatlas
 querychat
