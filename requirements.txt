@@ -8,7 +8,7 @@ numpy
 faicons
 python-dotenv
 chatlas
-querychat
+querychat==0.1.0
 sqlalchemy
 duckdb
 leafmap
