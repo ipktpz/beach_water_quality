@@ -12,6 +12,7 @@ sqlalchemy
 duckdb
 leafmap
 chevron
+anthropic
 
 
 
