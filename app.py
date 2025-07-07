@@ -15,6 +15,8 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "querychat", "pkg-py"))
 from dotenv import load_dotenv
 import querychat as qc
 
+
+load_dotenv()
 # ------------------- Load the data ---------------------------------------------------------------------------------------------------------
 
 df = pd.read_csv("merged_water_quality_weather.csv")
